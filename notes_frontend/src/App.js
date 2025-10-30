@@ -1,48 +1,77 @@
-import React, { useState, useEffect } from 'react';
-import logo from './logo.svg';
+import React, { useEffect, useMemo, useState } from 'react';
 import './App.css';
+import Header from './components/common/Header';
+import Sidebar from './components/Layout/Sidebar';
+import MainEditor from './components/Layout/MainEditor';
+import EmptyState from './components/common/EmptyState';
+import AuthGate from './components/auth/AuthGate';
+import { useNotes } from './hooks/useNotes';
+import { applyTheme } from './utils/theme';
+import { featureFlags } from './utils/env';
+import { checkConnectivity, getSupabaseEnvStatus } from './lib/supabaseClient';
 
 // PUBLIC_INTERFACE
 function App() {
-  const [theme, setTheme] = useState('light');
+  /** Ocean Notes App - single page layout with Supabase-backed notes */
 
-  // Effect to apply theme to document element
+  const [theme, setTheme] = useState('light');
+  const [user, setUser] = useState(null);
+  const flags = useMemo(() => featureFlags(), []);
+  const authEnabled = flags.has('auth');
+
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
+    applyTheme(theme);
   }, [theme]);
 
-  // PUBLIC_INTERFACE
-  const toggleTheme = () => {
-    setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
-  };
+  const { notes, selectedId, selectedNote, setSelectedId, onCreate, onDelete, onEdit, search, setSearch, loading } =
+    useNotes({ userId: authEnabled ? user?.id || null : null });
+
+  const [online, setOnline] = useState(true);
+  const [envMessage, setEnvMessage] = useState('');
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const status = getSupabaseEnvStatus();
+      if (!mounted) return;
+      if (!status.ready) {
+        setEnvMessage(status.message || 'Supabase not configured.');
+      }
+      const res = await checkConnectivity();
+      if (!mounted) return;
+      setOnline(res.ok);
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  const onToggleTheme = () => setTheme((t) => (t === 'light' ? 'dark' : 'light'));
+
+  const Main = (
+    <div className="app">
+      <Header online={online} message={envMessage} onToggleTheme={onToggleTheme} theme={theme} />
+      <Sidebar
+        notes={notes}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        onCreate={onCreate}
+        onDelete={onDelete}
+        search={search}
+        onSearch={setSearch}
+      />
+      <main className="main">
+        {selectedNote ? (
+          <MainEditor note={selectedNote} onChange={onEdit} />
+        ) : (
+          <EmptyState onCreate={onCreate} />
+        )}
+        {loading && <div style={{ padding: 8, textAlign: 'center', color: '#6b7280' }}>Loading...</div>}
+      </main>
+    </div>
+  );
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <button 
-          className="theme-toggle" 
-          onClick={toggleTheme}
-          aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-        >
-          {theme === 'light' ? '🌙 Dark' : '☀️ Light'}
-        </button>
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <p>
-          Current theme: <strong>{theme}</strong>
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <AuthGate enabled={authEnabled} onUserChange={setUser}>
+      {Main}
+    </AuthGate>
   );
 }
 
